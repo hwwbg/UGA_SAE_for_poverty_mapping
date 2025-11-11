@@ -2,8 +2,8 @@ clear all
 set more off
 
 /*===============================================================================
- Do-file 01 - testing assumptions...Developed for SAE training WB
- author Paul Corral
+Developed for SAE training WB
+ author Haoyu Wu (hwu4@worldbank.org)
 *=============================================================================*/
 version 14
 set seed 648743
