@@ -1,6 +1,7 @@
 # Small Area Estimation Training for Poverty Mapping – Uganda
 Entebbe, Uganda
 Nov. 10 to Nov. 14, 2025
+
 This repository accompanies a three-day **Small Area Estimation (SAE) Training** delivered to the Uganda Bureau of Statistics (UBOS). The training develops the analytical capacity needed to produce statistically robust district- and subcounty-level poverty and inequality estimates using modern SAE techniques.
 
 The program is structured around the full SAE workflow—from data preparation to model estimation, diagnostics, and map production—using Stata and following the **World Bank (2022) Guidelines for Poverty Mapping**.
