@@ -12,7 +12,7 @@ The program is structured around the full SAE workflow—from data preparation t
 
 Participants will acquire the skills to:
 
-- **Understand core SAE methodologies**, including unit-level models (ELL, EB) and area-level models (Fay–Herriot), with emphasis on variance decomposition, transformation decisions, and uncertainty quantification.
+- **Understand core SAE methodologies**, including unit-level models (ELL, EB and CensusEB) and area-level models (Fay–Herriot), with emphasis on variance decomposition, transformation decisions, and uncertainty quantification.
 - **Prepare, harmonize, and link** household survey data with census microdata, including construction of welfare aggregates, alignment of covariates, and validation of shared structures.
 - **Estimate and evaluate** small-area poverty and inequality indicators using Stata-based workflows (`sae`, `fhsae`), including MSE estimation through parametric bootstrap and Monte Carlo approaches.
 - **Generate, visualize, and interpret poverty maps**, explicitly incorporating uncertainty measures (e.g., MSE, RMSE, CV, confidence intervals).
