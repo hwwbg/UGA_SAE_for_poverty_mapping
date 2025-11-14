@@ -34,7 +34,7 @@ By the end of the training, participants will be able to:
 ## STATA pakage installation
 ### gihub
 ````
-ssc install
+net install github, from("https://haghish.github.io/github/")
 ````
 ### SAE
 ````
