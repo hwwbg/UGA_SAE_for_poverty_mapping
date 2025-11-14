@@ -35,9 +35,13 @@ By the end of the training, participants will be able to:
 ### gihub
 ````
 ssc install
-# SAE
+````
+### SAE
+````
 github install pcorralrodas/SAE-Stata-Package
-# FHSAE
+````
+### FHSAE
+````
 github install https://github.com/jpazvd/fhsae
 ````
 ## Contract
