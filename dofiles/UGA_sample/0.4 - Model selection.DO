@@ -1,0 +1,331 @@
+/*===============================================================================
+    Unit-model (UGA sample)
+	- Real world data application
+	- author Haoyu Wu (hw4@worldbank.org) 
+*==============================================================================*/
+	global main "C:\Users\wb545671\OneDrive - WBG\AFE_work\Mission\5.UGA_Nov2025\UGA_training\UGA_example"
+	global mdata  "$main\data_in"
+	global log    "$main\results"
+	global survey "$mdata\UNHS2023_hh.dta"
+	global census "$mdata\NPHC2024_hh.dta"
+	global temp   "$main\temp"
+
+	log close _all
+	*log using "$log\Model_selection", replace
+
+	clear all 
+	set more off
+
+	//global with candidate variables.
+	global myvar nofood skip_meal solar* water_dis* toilet_share asset* cloth shoes dwell_tenure* roof* wall* floor* dwell_type* stove* light* kitchen* water_drink* toilet_type* hand_wash* bathroom* waste*
+
+	version 15
+	set seed 648743
+
+*===============================================================================
+// End of preamble
+*===============================================================================
+	//load in survey data
+	use "$survey", clear
+	loc var dwell_tenure roof wall floor dwell_type stove light kitchen water_drink toilet_type hand_wash bathroom waste water_dis
+	foreach v of loc var{
+		tab `v', gen(`v')
+		drop `v'
+	}
+	
+	destring subcouty, replace
+	//Remove small incomes affecting model
+	*drop if welfare<1
+	gen lny = ln(welfare)
+	//Log shift transformation to approximate normality
+	lnskew0 double bcy = welfare
+	//removes skeweness from distribution
+	sum lny, d 
+	sum bcy, d
+	
+	//Data has already been cleaned and prepared. Data preparation and the creation
+	// of eligible covariates is of extreme importance. 
+
+		
+	//Check to see if lassoregress is installed, if not install
+	cap which lassoregress
+	if (_rc) ssc install elasticregress
+	
+	//Model selection - with Lasso	
+	*gen lnhhsize = ln(hhsize)
+	lassoregress bcy  $myvar [aw=mult], lambda1se epsilon(1e-10) numfolds(10)
+	*lasso linear bcy $myvar [iw=mult], selection(cv, serule folds(10))
+	local hhvars = e(varlist_nonzero)
+	global postlasso  `hhvars'
+	
+	//Try Henderson III GLS
+	*sae model h3 bcy $postlasso [aw=rmult], area(subcouty) 
+	
+	//Loop designed to remove non-significant covariates sequentially
+	forval z= 0.5(-0.05)0.05{
+		qui:sae model h3 bcy `hhvars' [aw=mult], area(subcouty) 
+		mata: bb=st_matrix("e(b_gls)")
+		mata: se=sqrt(diagonal(st_matrix("e(V_gls)")))
+		mata: zvals = bb':/se
+		mata: st_matrix("min",min(abs(zvals))) //find the abs min in the zvals
+		local zv = (-min[1,1])
+		if (2*normal(`zv')<`z') exit //All coefs significant, exit, no need to check
+	
+		foreach x of varlist `hhvars'{
+			local hhvars1
+			qui: sae model h3 bcy `hhvars' [aw=mult], area(subcouty)
+			qui: test `x' 
+			if (r(p)>`z'){
+				local hhvars1
+				foreach yy of local hhvars{
+					if ("`yy'"=="`x'") dis ""
+					else local hhvars1 `hhvars1' `yy'
+				}
+			}
+			else local hhvars1 `hhvars'
+			local hhvars `hhvars1'		
+		}
+	}
+
+	
+	global postsign `hhvars'
+	
+	//Henderson III GLS - model post removal of non-significant
+	*sae model h3 bcy $postsign [aw=mult], area(subcouty) 
+	
+	//Check for multicollinearity, and remove highly collinear (VIF>5)
+	reg bcy $postsign [aw=mult],r
+	loc xnum = e(df_m)
+	*cap drop touse 	//remove vector if it is present to avoid error in next step
+	*gen touse = e(sample) 		//Indicates the observations used
+						
+	local hhvars $postsign
+	vif                          //Variance inflation factor
+	//Remove covariates with VIF greater than 5
+	*mata: ds = _f_stepvif("`hhvars'","mult",5,"touse")  //is used to remove covariates with a VIF above a specified threshold, it comes with SAE pakage
+	glo postvif
+	forvalues i = 1/`xnum'{
+		if r(vif_`i') < 5 glo postvif $postvif  `r(name_`i')'
+	}
+	*global postvif `vifvar'
+	//VIF check
+	reg bcy $postvif [aw=mult], r
+	vif
+	
+	//Henderson III GLS - model post removal of non-significant
+	sae model h3 bcy $postvif [aw=mult], area(subcouty) 
+	
+*===============================================================================
+// 2.5 Model checks
+*===============================================================================
+
+	reg bcy $postvif	
+	predict cdist, cooksd
+	predict rstud, rstudent
+	
+	reg bcy $postvif [aw=mult]
+	*local KK = e(df_m)
+	predict lev, leverage
+	predict eps, resid
+	predict bc_yhat, xb
+	
+	/***Check for heteroskedasticity***/
+	//1. Visual check: residuals vs fitted values
+	rvfplot, yline(0)
+	//✔ funnel shape → heteroskedastic
+	//✔ spreading variance → heteroskedastic
+	//✖ flat horizontal band → homoskedastic
+	
+	//2.Breusch–Pagan (BP) test 
+	estat hettest, iid
+	//Interpretation:
+	//p < 0.05 → strong evidence of heteroskedasticity → α-model needed
+	//p ≥ 0.05 → no evidence → α-model not needed
+
+	//Let's take a look at our residuals
+	*scatter eps bc_yhat
+
+	// so there's a bunch of small incomes that may be affecting our model!
+	*scatter eps bc_yhat if eps > -7
+
+	/* https://stats.idre.ucla.edu/stata/dae/robust-regression/
+	Residual:  The difference between the predicted value (based on the regression ///
+	equation) and the actual, observed value.
+
+	Outlier:  In linear regression, an outlier is an observation with large ///
+	residual.  In other words, it is an observation whose dependent-variable ///
+	value is unusual given its value on the predictor variables.  An outlier may ///
+	indicate a sample peculiarity or may indicate a data entry error or ///
+	other problem.
+		
+	Leverage:  An observation with an extreme value on a predictor variable is a ///
+	point with high leverage.  Leverage is a measure of how far an independent ///
+	variable deviates from its mean.  High leverage points can have a great ///
+	amount of effect on the estimate of regression coefficients.
+		
+	Influence:  An observation is said to be influential if removing the ///
+	substantially changes the estimate of the regression coefficients.  ///
+	Influence can be thought of as the product of leverage and outlierness. 
+		
+	Cook's distance (or Cook's D): A measure that combines the information of ///
+	leverage and residual of the observation
+	*/
+		
+	/* Rules of thumb:
+	Cooks -> >4/N, also according to "Regression Diagnostics: An Expository ///
+	Treatment of Outliers and Influential Cases, values over 1...
+		
+	Abs(rstu) -> >2 We should pay attention to studentized residuals that exceed ///
+	+2 or -2, and get even more concerned about residuals that exceed +2.5 or ///
+	-2.5 and even yet more concerned about residuals that exceed +3 or -3.  ///
+
+	leverage ->	>(2k+2)/n	
+	*/
+	hist cdist, name(diag_cooksd, replace)
+	hist lev, name(diag_leverage, replace)
+	hist rstud, name(diag_rstudent, replace)
+	twoway scatter cdist lev, name(diag_cooksd_lev, replace)
+	
+	lvr2plot, name(lvr2)
+	rvfplot, name(rvf)
+	
+	sum cdist, d
+	local max = r(max)
+	local p99 = r(p99)		
+	
+	reg lny $postvif [aw=mult]
+	local myN=e(N)
+	local myK=e(rank)
+	
+	//We have influential data points...
+	reg lny $postvif if cdist<4/`myN' [aw=mult]
+	reg lny $postvif if cdist<`max'   [aw=mult]
+	reg lny $postvif if cdist<`p99'   [aw=mult]
+	gen nogo = abs(rstud)>2 & cdist>4/`myN' & lev>(2*`myK'+2)/`myN'
+	//mark points that are simultaneously outliers, high-leverage, and influential
+
+	*===============================================================================
+	// Selecting the Alpha model
+	*===============================================================================	
+
+	*des residual_alfa //The dependent variable for the alfa model
+	// Macro holding all eligible vars
+	unab allvars : $myvar
+	//Macro with current variables
+	local nogo $postvif
+	
+	//We want to only use variables not used
+	foreach x of local allvars{
+		local in = 0
+		foreach y of local nogo{
+			if ("`x'"=="`y'")	local in=1
+		}
+		if (`in'==0) local A `A' `x'
+	}	
+	
+	
+	global A `A' //macro holding eligible variables for alpha model
+	
+	//Henderson III GLS - add alfa model
+	sae model h3 bcy $postvif if nogo==0 [aw=mult], area(subcouty) ///
+	alfatest(residual) zvar($A)
+	
+	lassoregress residual_alfa $A if nogo==0 [aw=mult]
+	
+	local alfa = e(varlist_nonzero)
+	global alfa `alfa'
+	
+	reg residual_alfa $alfa if nogo==0 [aw=mult],r
+	gen tousealfa = e(sample)
+	
+	//Remove vif vars
+	*mata: ds = _f_stepvif("$alfa","mult",5,"tousealfa")
+	loc xnum = e(df_m)
+	vif                          //Variance inflation factor
+	//Remove covariates with VIF greater than 5
+	*mata: ds = _f_stepvif("`hhvars'","mult",5,"touse")  //is used to remove covariates with a VIF above a specified threshold, it comes with SAE pakage
+	glo alfa
+	forvalues i = 1/`xnum'{
+		if r(vif_`i') < 5 glo alfa $alfa  `r(name_`i')'
+	}
+	
+	
+	*global alfa `vifvar'
+	
+	di "$alfa"
+
+	//Alfa vars before removal of non-significant vars
+	*global beforealfa `alfa'
+	
+	local hhvars $alfa
+	
+	forval z= 0.9(-0.1)0.1{
+		foreach x of varlist `hhvars'{
+			local hhvars1
+			qui: reg residual_alfa `hhvars' [aw=mult], r
+			qui: test `x' 
+			if (r(p)>`z'){
+				local hhvars1
+				foreach yy of local hhvars{
+					if ("`yy'"=="`x'") dis ""
+					else local hhvars1 `hhvars1' `yy'
+				}
+			}
+			else local hhvars1 `hhvars'
+			local hhvars `hhvars1'
+		
+		}
+	}
+	global alfavars `hhvars'
+	di "$alfavars"
+	//Henderson III Model with alpha model
+	*sae model h3 bcy $postvif if nogo==0 [aw=mult], area(subcouty) zvar($alfavars)
+
+	
+	*===============================================================================
+	// GLS model, one final removal of non-significant variables
+	*===============================================================================
+		//Loop designed to remove non-significant covariates sequentially
+		local hhvars $postvif
+		forval z= 0.5(-0.05)0.05{
+			qui:sae model h3 bcy `hhvars' if nogo==0 [aw=mult], area(subcouty) ///
+			zvar($alfavars)
+			mata: bb=st_matrix("e(b_gls)")
+			mata: se=sqrt(diagonal(st_matrix("e(V_gls)")))
+			mata: zvals = bb':/se
+			mata: st_matrix("min",min(abs(zvals)))
+			local zv = (-min[1,1])
+			if (2*normal(`zv')<`z') exit
+		
+			foreach x of varlist `hhvars'{
+				local hhvars1
+				qui:sae model h3 bcy `hhvars' if nogo==0 [aw=mult], area(subcouty) ///
+				zvar($alfavars)
+				qui: test `x' 
+				if (r(p)>`z'){
+					local hhvars1
+					foreach yy of local hhvars{
+						if ("`yy'"=="`x'") dis ""
+						else local hhvars1 `hhvars1' `yy'
+					}
+				}
+				else local hhvars1 `hhvars'
+				local hhvars `hhvars1'		
+			}
+		}	
+		
+		global postalfa `hhvars'
+		
+	*===============================================================================
+	// SAVE the data with the pertinent covariates and other info	
+	*===============================================================================
+
+	sae model h3 bcy $postalfa if nogo==0 [aw=mult], area(subcouty) zvar($alfavars)
+	
+
+	char _dta[rhs]   $postalfa
+	char _dta[alpha] $alfavars
+	char _dta[sel]   nogo
+
+	save "$temp\mysvy.dta", replace
+	log close _all
