@@ -32,14 +32,14 @@ By the end of the training, participants will be able to:
 ---
 
 ## STATA pakage installation
-# gihub
-```
+### gihub
+````
 ssc install
 # SAE
 github install pcorralrodas/SAE-Stata-Package
 # FHSAE
 github install https://github.com/jpazvd/fhsae
-
+````
 ## Contract
 Haoyu Wu: <hwu4@worldbank.org>\
 Kristina Noelle Vaughan: <kvaughan@worldbank.org>
